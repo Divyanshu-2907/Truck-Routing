@@ -1,0 +1,42 @@
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+exclude = [".venv", "staticfiles"]
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "F",      # pyflakes
+    "W",      # pycodestyle warnings
+    "I",      # import sorting
+    "UP",     # outdated syntax
+    "B",      # likely bugs
+    "C4",     # comprehensions
+    "SIM",    # simplifications
+    "RET",    # return statements
+    "ARG",    # unused arguments
+    "D",      # docstrings
+    "ANN",    # type annotations
+]
+ignore = [
+    "D203",   # conflicts with D211 (no blank line before class docstring)
+    "D213",   # conflicts with D212 (summary on the first line)
+    "ANN401", # Any is deliberate for raw JSON payloads
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Test doubles must copy the signature of the thing they stand in for, so
+# their arguments are deliberately unused and untyped. Nesting `patch` inside
+# `assertRaises` also reads better than combining them. Tests document
+# themselves through their class and method names.
+"routing/tests/*" = [
+    "ANN",   # test doubles mirror third-party signatures
+    "ARG",   # the same: arguments exist to match, not to be used
+    "D1",    # names say what each test checks
+    "SIM117",  # nested with-statements are clearer here
+]
+"config/*" = ["D100", "D103"]
+"manage.py" = ["D100", "D103", "ANN"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"

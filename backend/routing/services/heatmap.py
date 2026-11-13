@@ -1,0 +1,178 @@
+"""The weather heatmap for the whole trip corridor, hour by hour.
+
+The map's heatmap answers a different question from the checkpoints. A
+checkpoint says "this is the weather when the truck gets here". The heatmap
+says "this is the weather across the whole corridor at 3pm", so the driver
+can scrub through 48 hours and see a storm move across the route.
+
+To do that we need weather away from the road as well as on it, so the grid
+is built from three lines: the routes themselves, and two more about 30
+miles out to either side. Points are sampled every 25 miles, rounded so that
+neighbouring routes share points, and capped so a coast-to-coast trip cannot
+turn into thousands of requests.
+
+The result is deliberately compact - risk levels as small integers in an
+array per hour - because the frontend holds all 49 hours in memory at once
+so the slider never has to ask the server for anything.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+
+from .geo import (
+    DISTANCE_EPSILON_MILES,
+    Coordinate,
+    cumulative_miles,
+    initial_bearing,
+    interpolate_point,
+    point_at_bearing,
+)
+from .http_client import Cache
+from .risk import assess
+from .weather import fetch_hourly
+
+#: How far apart corridor samples are along each route.
+CORRIDOR_SPACING_MILES = 25.0
+
+#: How far out to either side of the road the corridor reaches.
+CORRIDOR_OFFSET_MILES = 30.0
+
+#: Upper limit on grid points, which keeps the weather lookup to four batches.
+MAX_CORRIDOR_POINTS = 400
+
+#: The forecast slider covers the departure hour plus the next 48 hours.
+FORECAST_HOURS = 48
+
+#: Grid points are rounded to this many decimals, matching the weather cache.
+GRID_PRECISION = 2
+
+
+@dataclass(frozen=True)
+class HeatmapGrid:
+    """Risk levels across the corridor, for every hour of the slider."""
+
+    times: list[datetime]
+    points: list[Coordinate]
+    #: ``values[hour][point]`` is a risk level from 0 (Low) to 4 (No Travel).
+    values: list[list[int]]
+
+
+def corridor_points(
+    geometries: Sequence[Sequence[Coordinate]],
+    *,
+    spacing_miles: float = CORRIDOR_SPACING_MILES,
+    offset_miles: float = CORRIDOR_OFFSET_MILES,
+    max_points: int = MAX_CORRIDOR_POINTS,
+) -> list[Coordinate]:
+    """Points covering the band of land the routes run through.
+
+    For every sample along a route we also take a point to its left and to
+    its right, so the heatmap has width and a storm beside the road is still
+    visible.
+    """
+    points: list[Coordinate] = []
+
+    for line in geometries:
+        if len(line) < 2:
+            continue
+
+        shape = list(line)
+        cumulative = cumulative_miles(shape)
+        total_miles = cumulative[-1]
+
+        for mile in _sample_miles(total_miles, spacing_miles):
+            centre = interpolate_point(shape, cumulative, mile)
+            heading = _heading_at(shape, cumulative, mile, total_miles)
+            points.append(centre)
+            points.append(point_at_bearing(centre, heading - 90, offset_miles))
+            points.append(point_at_bearing(centre, heading + 90, offset_miles))
+
+    return _dedupe_and_cap(points, max_points)
+
+
+def build_heatmap(
+    geometries: Sequence[Sequence[Coordinate]],
+    departure: datetime,
+    load_lb: float,
+    *,
+    hours: int = FORECAST_HOURS,
+    horizon: datetime | None = None,
+    cache: Cache | None = None,
+) -> HeatmapGrid:
+    """Score the corridor for every hour from departure to ``hours`` later.
+
+    Frame 0 is the departure itself, to the minute, and each frame after it
+    is one hour later, so the slider's "+6h" really means six hours after
+    leaving. Each frame takes the forecast hour nearest to it.
+
+    Frames past ``horizon`` - the last hour the forecast covers - are left
+    out rather than filled with the wrong weather, so a trip departing near
+    the end of the forecast gets a shorter slider.
+
+    The weather is fetched once for the whole window, then scored in memory,
+    so the frames cost one round of requests rather than one each.
+    """
+    points = corridor_points(geometries)
+    start = departure.astimezone(UTC).replace(second=0, microsecond=0)
+    times = [start + timedelta(hours=step) for step in range(hours + 1)]
+    if horizon is not None:
+        times = [moment for moment in times if moment <= horizon] or [start]
+
+    if not points:
+        return HeatmapGrid(times=times, points=[], values=[[] for _ in times])
+
+    forecasts = fetch_hourly(points, times[0], times[-1], cache=cache)
+
+    values = [[0] * len(points) for _ in times]
+    for point_index, forecast in enumerate(forecasts):
+        for hour_index, moment in enumerate(times):
+            sample = forecast.nearest(moment)
+            verdict = assess(sample.wind_mph, sample.rain_in, sample.snow_in, load_lb)
+            values[hour_index][point_index] = int(verdict.level)
+
+    return HeatmapGrid(times=times, points=points, values=values)
+
+
+def _sample_miles(total_miles: float, spacing_miles: float) -> list[float]:
+    """Mile markers every ``spacing_miles``, always including the destination."""
+    miles: list[float] = []
+    mile = 0.0
+    while mile < total_miles - DISTANCE_EPSILON_MILES:
+        miles.append(mile)
+        mile += spacing_miles
+    miles.append(total_miles)
+    return miles
+
+
+def _heading_at(
+    line: list[Coordinate], cumulative: list[float], mile: float, total_miles: float
+) -> float:
+    """Which way the road points at this mile, used to offset sideways."""
+    here = interpolate_point(line, cumulative, mile)
+    ahead = interpolate_point(line, cumulative, min(mile + 1.0, total_miles))
+    if ahead == here:
+        # At the very end of the route, look backwards instead.
+        behind = interpolate_point(line, cumulative, max(mile - 1.0, 0.0))
+        return initial_bearing(behind, here) if behind != here else 0.0
+    return initial_bearing(here, ahead)
+
+
+def _dedupe_and_cap(points: list[Coordinate], max_points: int) -> list[Coordinate]:
+    """Round points onto a grid, drop repeats, and thin out if there are too many.
+
+    Rounding is what makes the three routes share points where they run
+    together, which cuts both the request count and the cache misses.
+    """
+    rounded = [(round(lon, GRID_PRECISION), round(lat, GRID_PRECISION)) for lon, lat in points]
+    unique = list(dict.fromkeys(rounded))
+
+    if len(unique) <= max_points:
+        return unique
+
+    # Keep an evenly spread subset rather than the first N, so the thinned
+    # grid still covers the whole trip instead of just its first half.
+    stride = len(unique) / max_points
+    return [unique[int(index * stride)] for index in range(max_points)]

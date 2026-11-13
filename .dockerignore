@@ -1,0 +1,26 @@
+# Everything that must not be copied into the build context: it would either
+# bloat the image, overwrite what the build produces, or leak local state.
+
+# Python
+**/__pycache__/
+**/*.py[cod]
+backend/.venv/
+backend/staticfiles/
+backend/frontend_dist/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+**/npm-debug.log*
+
+# Git and editors
+.git/
+.gitignore
+.vscode/
+.idea/
+**/.DS_Store
+
+# Docs and local config
+README.md
+.env
+.env.local

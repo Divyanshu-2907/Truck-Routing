@@ -1,0 +1,23 @@
+# Render reads this file to create the service. See the README for the
+# click-by-click steps.
+services:
+  - type: web
+    name: truck-routing
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    # Render restarts the service if this stops returning 200.
+    healthCheckPath: /api/health
+    envVars:
+      - key: DJANGO_DEBUG
+        value: "0"
+      # Render generates a random secret and keeps it out of the repo.
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      # The leading dot matches any subdomain of onrender.com.
+      - key: DJANGO_ALLOWED_HOSTS
+        value: ".onrender.com,localhost,127.0.0.1"
+      # Identifies this app to Nominatim, as its usage policy requires.
+      - key: NOMINATIM_USER_AGENT
+        value: "WeatherAwareTruckRouting/1.0 (take-home project)"
