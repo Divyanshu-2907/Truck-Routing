@@ -139,7 +139,9 @@ export function PlanForm({ onSubmit, loading, initial = null, autoSubmit = false
         value={departure}
         onChange={(event) => setDeparture(event.target.value)}
         error={Boolean(errors.departure)}
-        helperText={errors.departure ?? `Your time · ${BROWSER_TIME_ZONE}`}
+        helperText={
+          errors.departure ?? `Your local time (${BROWSER_TIME_ZONE}). Arrivals show local time en route.`
+        }
         slotProps={{ inputLabel: { shrink: true } }}
       />
 

@@ -8,19 +8,26 @@ import Paper from '@mui/material/Paper';
 import Slider from '@mui/material/Slider';
 import Stack from '@mui/material/Stack';
 import Switch from '@mui/material/Switch';
+import ToggleButton from '@mui/material/ToggleButton';
+import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import Typography from '@mui/material/Typography';
 import { useEffect } from 'react';
 
-import { formatLocalDateTime } from '../format';
+import { formatCheckpointTime, formatLocalDateTime } from '../format';
+import { METRICS, METRIC_ORDER, type HeatmapMetric } from '../heatmapMetrics';
 import { MAP_CARD } from '../styles';
 import { COLORS, LABEL_SX, MONO_SX } from '../theme';
-import type { HeatmapResponse } from '../types';
+import type { HeatmapResponse, Place } from '../types';
 
 /** How long each hour is shown for while playing. */
 const FRAME_MS = 400;
 
 interface Props {
   heatmap: HeatmapResponse | null;
+  /** The trip's origin, whose local time the forecast hours are read in. */
+  origin: Place | null;
+  metric: HeatmapMetric;
+  onMetricChange: (metric: HeatmapMetric) => void;
   loading: boolean;
   hourIndex: number;
   onHourChange: (hour: number) => void;
@@ -37,6 +44,9 @@ interface Props {
  */
 export function ForecastSlider({
   heatmap,
+  origin,
+  metric,
+  onMetricChange,
   loading,
   hourIndex,
   onHourChange,
@@ -79,7 +89,7 @@ export function ForecastSlider({
         // Sits above the drawer button on a phone, clear of the legend on a laptop.
         bottom: { xs: 64, md: 24 },
         zIndex: 1000, // Above Leaflet's own panes.
-        width: { xs: 'calc(100% - 24px)', md: 'min(640px, calc(100% - 220px))' },
+        width: { xs: 'calc(100% - 24px)', md: 'min(760px, calc(100% - 220px))' },
         px: 2,
         py: 1,
       }}
@@ -105,7 +115,7 @@ export function ForecastSlider({
               <Box component="span" sx={{ color: COLORS.accent }}>
                 {hourIndex === 0 ? 'DEPARTURE' : `+${String(hourIndex).padStart(2, '0')}H`}
               </Box>
-              {currentTime ? `  ${formatLocalDateTime(currentTime)}` : ''}
+              {currentTime ? `  ${formatForecastTime(currentTime, origin)}` : ''}
             </Typography>
             {loading ? (
               <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
@@ -136,21 +146,43 @@ export function ForecastSlider({
           />
         </Box>
 
-        <FormControlLabel
-          control={
-            <Switch
-              size="small"
-              checked={visible}
-              onChange={(event) => onVisibleChange(event.target.checked)}
-            />
-          }
-          label={
-            <Typography sx={{ ...LABEL_SX, fontSize: 10, whiteSpace: 'nowrap' }}>
-              Heatmap
-            </Typography>
-          }
-          sx={{ mr: 0 }}
-        />
+        <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
+          {/* Which reading the heat shows. All four grids arrive with the
+              forecast, so switching costs no request. */}
+          <ToggleButtonGroup
+            exclusive
+            size="small"
+            value={metric}
+            disabled={!heatmap || !visible}
+            onChange={(_event, next: HeatmapMetric | null) => {
+              if (next !== null) {
+                onMetricChange(next);
+              }
+            }}
+          >
+            {METRIC_ORDER.map((option) => (
+              <ToggleButton key={option} value={option} sx={{ px: 1, py: 0.25, fontSize: 10 }}>
+                {METRICS[option].label}
+              </ToggleButton>
+            ))}
+          </ToggleButtonGroup>
+
+          <FormControlLabel
+            control={
+              <Switch
+                size="small"
+                checked={visible}
+                onChange={(event) => onVisibleChange(event.target.checked)}
+              />
+            }
+            label={
+              <Typography sx={{ ...LABEL_SX, fontSize: 10, whiteSpace: 'nowrap' }}>
+                Heat
+              </Typography>
+            }
+            sx={{ mr: 0 }}
+          />
+        </Stack>
       </Stack>
     </Paper>
   );
@@ -164,3 +196,18 @@ const HOUR_MARKS = [0, 12, 24, 36, 48].map((hour) => ({
   value: hour,
   label: hour === 0 ? '0' : `${hour}h`,
 }));
+
+/**
+ * A forecast hour in the origin's local time.
+ *
+ * The slider is read against the checkpoint ETAs beside it, and those are
+ * in local time along the route, so a browser-clock reading here would
+ * invite the two to be compared wrongly. Before a trip is planned there is
+ * no origin, and the browser's own zone is used.
+ */
+function formatForecastTime(iso: string, origin: Place | null): string {
+  if (!origin) {
+    return formatLocalDateTime(iso);
+  }
+  return formatCheckpointTime(iso, origin.lat, origin.lon);
+}

@@ -20,6 +20,7 @@ import { COLORS, LABEL_SX, MONO_SX } from '../theme';
 import type { Checkpoint, PlanResponse } from '../types';
 import { CheckpointList } from './CheckpointList';
 import { RouteComparison } from './RouteComparison';
+import { RouteWeatherLine } from './RouteWeatherLine';
 import { StatTiles } from './StatTiles';
 import { WhyThisRoute } from './WhyThisRoute';
 
@@ -88,7 +89,12 @@ function RightPanelView({
           <PanelSkeleton />
         ) : plan && route ? (
           <Stack spacing={2.5}>
-            <StatTiles route={route} />
+            <Box>
+              <StatTiles route={route} />
+              <Box sx={{ mt: 1 }}>
+                <RouteWeatherLine route={route} />
+              </Box>
+            </Box>
 
             <Divider />
             <Box>

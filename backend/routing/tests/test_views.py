@@ -187,6 +187,7 @@ class PlanResponseShapeTests(ApiTestCase):
                 "level",
                 "level_label",
                 "reason",
+                "condition",
             },
         )
 
@@ -200,6 +201,22 @@ class HeatmapEndpointTests(ApiTestCase):
         self.assertEqual(len(grid["times"]), 49)
         self.assertEqual(len(grid["values"]), 49)
         self.assertEqual(len(grid["values"][0]), len(grid["points"]))
+
+        # The raw readings come back beside the risk, on the same grid, so
+        # the map can switch metric without asking the server again.
+        for metric in ("wind", "rain", "snow"):
+            self.assertEqual(len(grid[metric]), 49, metric)
+            self.assertEqual(len(grid[metric][0]), len(grid["points"]), metric)
+            self.assertTrue(all(isinstance(value, int) for value in grid[metric][0]), metric)
+
+    def test_raw_readings_use_the_documented_scales(self) -> None:
+        response = self.post("/api/heatmap", heatmap_trip())
+        grid = response.json()
+
+        # The offline forecast is a flat 5 mph with no rain or snow.
+        self.assertEqual(set(grid["wind"][0]), {5})
+        self.assertEqual(set(grid["rain"][0]), {0})
+        self.assertEqual(set(grid["snow"][0]), {0})
 
     def test_frame_zero_is_the_departure(self) -> None:
         body = heatmap_trip()

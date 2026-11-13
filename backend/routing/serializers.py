@@ -16,6 +16,7 @@ from typing import Any
 
 from rest_framework import serializers
 
+from .services.conditions import describe_conditions
 from .services.geo import haversine_miles
 from .services.heatmap import HeatmapGrid
 from .services.planner import ScoredRoute, format_duration
@@ -113,15 +114,21 @@ class HeatmapRequestSerializer(TripSerializer):
 def heatmap_to_dict(grid: HeatmapGrid) -> dict[str, Any]:
     """The compact grid sent to the browser.
 
-    Risk levels go out as small integers rather than objects: the whole
+    Everything goes out as small integers rather than objects: the whole
     48 hour grid is then a few tens of kilobytes, small enough for the
     frontend to hold every frame in memory and never call back while the
-    driver drags the slider.
+    driver drags the slider or switches between risk, wind, rain and snow.
+
+    Units follow ``HeatmapGrid``: wind in mph, rain in hundredths of an
+    inch per hour, snow in tenths.
     """
     return {
         "times": [moment.isoformat() for moment in grid.times],
         "points": [[round(lat, 4), round(lon, 4)] for lon, lat in grid.points],
         "values": grid.values,
+        "wind": grid.wind,
+        "rain": grid.rain,
+        "snow": grid.snow,
     }
 
 
@@ -184,4 +191,5 @@ def _checkpoint_to_dict(point: Any) -> dict[str, Any]:
         "level": int(point.level),
         "level_label": point.level.label,
         "reason": point.reason,
+        "condition": describe_conditions(point.wind_mph, point.rain_in, point.snow_in),
     }

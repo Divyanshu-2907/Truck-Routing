@@ -3,6 +3,7 @@ import { HeatLayer, type HeatLatLng, type HeatLayerOptions } from 'leaflet.heat'
 import { useEffect, useMemo, useRef } from 'react';
 import { useMap } from 'react-leaflet';
 
+import { gridFor, intensityOf, type HeatmapMetric } from '../heatmapMetrics';
 import { RISK_COLORS } from '../riskScale';
 import type { HeatmapResponse } from '../types';
 
@@ -42,6 +43,7 @@ interface Props {
   heatmap: HeatmapResponse | null;
   hourIndex: number;
   visible: boolean;
+  metric: HeatmapMetric;
 }
 
 /**
@@ -55,28 +57,33 @@ interface Props {
  *    only calls `setLatLngs`, which redraws the canvas without rebuilding
  *    the layer or touching React's tree.
  */
-export function HeatmapLayer({ heatmap, hourIndex, visible }: Props) {
+export function HeatmapLayer({ heatmap, hourIndex, visible, metric }: Props) {
   const map = useMap();
   const layerRef = useRef<MapHeatLayer | null>(null);
 
-  // One ready-made array of points per hour. Each point carries its risk as
-  // `alt`, which is where this plugin reads intensity from. Calm points are
-  // left out entirely: they would only wash the colours out.
+  // One ready-made array of points per hour, for the metric on show. Each
+  // point carries its intensity as `alt`, which is where this plugin reads
+  // it from. Points with nothing to report are left out entirely: they
+  // would only wash the colours out.
+  //
+  // Switching metric rebuilds these once, which is the only work a toggle
+  // costs. Moving the slider still just picks a different array.
   const frames = useMemo<HeatLatLng[][]>(() => {
     if (!heatmap) {
       return [];
     }
-    return heatmap.values.map((levels) => {
+    return gridFor(heatmap, metric).map((readings) => {
       const frame: HeatLatLng[] = [];
-      levels.forEach((level, index) => {
+      readings.forEach((reading, index) => {
         const point = heatmap.points[index];
-        if (level > 0 && point) {
-          frame.push({ lat: point[0], lng: point[1], alt: level / 4 });
+        const intensity = intensityOf(reading, metric);
+        if (intensity > 0 && point) {
+          frame.push({ lat: point[0], lng: point[1], alt: intensity });
         }
       });
       return frame;
     });
-  }, [heatmap]);
+  }, [heatmap, metric]);
 
   // Create the layer once, and take it down when the map goes away.
   useEffect(() => {

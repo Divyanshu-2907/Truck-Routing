@@ -16,6 +16,7 @@ import { RoutePills } from './components/RoutePills';
 import type { MapFocus } from './components/map/MapEffects';
 import type { ExampleTrip } from './exampleTrips';
 import { nextFullHour } from './format';
+import type { HeatmapMetric } from './heatmapMetrics';
 import type { Checkpoint, HeatmapResponse, PlanRequest, PlanResponse, Place } from './types';
 import { COLORS } from './theme';
 import { readTripFromUrl, writeTripToUrl } from './urlState';
@@ -51,6 +52,7 @@ export function App() {
   const [hourIndex, setHourIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [heatmapVisible, setHeatmapVisible] = useState(true);
+  const [heatmapMetric, setHeatmapMetric] = useState<HeatmapMetric>('risk');
 
   const theme = useTheme();
   // Below 1200px the analytics panel folds away; below 800px so does the form.
@@ -197,6 +199,7 @@ export function App() {
           heatmap={heatmap}
           hourIndex={hourIndex}
           heatmapVisible={heatmapVisible}
+          heatmapMetric={heatmapMetric}
           focus={focus}
         />
 
@@ -207,6 +210,7 @@ export function App() {
         {plan ? (
           <ForecastSlider
             heatmap={heatmap}
+            origin={endpoints?.origin ?? null}
             loading={heatmapLoading}
             hourIndex={hourIndex}
             onHourChange={setHourIndex}
@@ -214,6 +218,8 @@ export function App() {
             onPlayingChange={setPlaying}
             visible={heatmapVisible}
             onVisibleChange={setHeatmapVisible}
+            metric={heatmapMetric}
+            onMetricChange={setHeatmapMetric}
           />
         ) : null}
 

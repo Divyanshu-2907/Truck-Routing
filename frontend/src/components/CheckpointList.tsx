@@ -5,7 +5,7 @@ import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import { useState } from 'react';
 
-import { formatLocalDateTime } from '../format';
+import { formatCheckpointTime } from '../format';
 import { RISK_COLORS, RISK_OUTLINE, RISK_TINTS } from '../riskScale';
 import { COLORS, LABEL_SX, MONO_SX, TRANSITION } from '../theme';
 import type { Checkpoint, PlannedRoute } from '../types';
@@ -79,9 +79,16 @@ function Row({ checkpoint, onClick }: { checkpoint: Checkpoint; onClick: () => v
         spacing={1}
         sx={{ alignItems: 'center', justifyContent: 'space-between' }}
       >
-        <Typography sx={{ ...MONO_SX, fontSize: 12.5 }}>
-          MM {Math.round(checkpoint.mile).toLocaleString()}
-        </Typography>
+        <Stack direction="row" spacing={1} sx={{ alignItems: 'baseline', minWidth: 0 }}>
+          <Typography sx={{ ...MONO_SX, fontSize: 12.5 }}>
+            MM {Math.round(checkpoint.mile).toLocaleString()}
+          </Typography>
+          <Typography
+            sx={{ ...LABEL_SX, fontSize: 10, color: COLORS.text, whiteSpace: 'nowrap' }}
+          >
+            {checkpoint.condition}
+          </Typography>
+        </Stack>
         <Chip
           size="small"
           label={checkpoint.level_label.toUpperCase()}
@@ -97,7 +104,7 @@ function Row({ checkpoint, onClick }: { checkpoint: Checkpoint; onClick: () => v
       </Stack>
 
       <Typography sx={{ ...MONO_SX, fontSize: 10, color: COLORS.textSecondary, display: 'block' }}>
-        {formatLocalDateTime(checkpoint.eta)}
+        {formatCheckpointTime(checkpoint.eta, checkpoint.lat, checkpoint.lon)}
       </Typography>
       <Typography sx={{ ...MONO_SX, fontSize: 10, color: COLORS.textSecondary }}>
         {checkpoint.wind_mph.toFixed(0).padStart(2, '0')} MPH · {checkpoint.rain_in.toFixed(2)} IN/HR

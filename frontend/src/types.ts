@@ -37,6 +37,8 @@ export interface Checkpoint {
   level: RiskLevel;
   level_label: string;
   reason: string;
+  /** Plain word for what the weather is doing, e.g. "Heavy rain". */
+  condition: string;
 }
 
 /** The whole-route picture shown on a route card. */
@@ -99,12 +101,18 @@ export interface PlanRequest {
  * has to call the server.
  */
 export interface HeatmapResponse {
-  /** 49 ISO timestamps: the departure hour, then the next 48. */
+  /** Up to 49 ISO timestamps: the departure, then each following hour. */
   times: string[];
   /** Grid positions as [latitude, longitude]. */
   points: [number, number][];
   /** values[hour][point] = risk level 0-4. */
   values: number[][];
+  /** wind[hour][point] = whole miles per hour. */
+  wind: number[][];
+  /** rain[hour][point] = hundredths of an inch per hour, so 25 is 0.25. */
+  rain: number[][];
+  /** snow[hour][point] = tenths of an inch per hour, so 15 is 1.5. */
+  snow: number[][];
 }
 
 export interface HeatmapRequest {

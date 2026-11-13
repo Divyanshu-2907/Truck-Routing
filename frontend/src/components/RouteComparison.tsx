@@ -7,6 +7,7 @@ import { BADGE_LABELS, badgesForRoutes, type BadgeKind } from '../badges';
 import { COLORS, FONT_CONDENSED, LABEL_SX, MONO_SX, TRANSITION } from '../theme';
 import type { PlanResponse, PlannedRoute } from '../types';
 import { RiskBar } from './RiskBar';
+import { RouteWeatherLine } from './RouteWeatherLine';
 import { RouteShield } from './RouteShield';
 
 interface Props {
@@ -105,6 +106,8 @@ function RouteCard({ route, badges, selected, recommended, reason, onSelect }: C
         </Stack>
 
         <RiskBar milesByLevel={summary.miles_by_level} />
+
+        <RouteWeatherLine route={route} />
 
         {reason ? (
           <Typography sx={{ fontSize: 11.5, color: COLORS.textSecondary, lineHeight: 1.5 }}>

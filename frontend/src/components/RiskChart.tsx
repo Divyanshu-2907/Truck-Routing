@@ -11,7 +11,7 @@ import {
   YAxis,
 } from 'recharts';
 
-import { formatLocalDateTime } from '../format';
+import { formatCheckpointTime } from '../format';
 import { RISK_COLORS, RISK_LABELS } from '../riskScale';
 import { COLORS, FONT_MONO, LABEL_SX, MONO_SX } from '../theme';
 import type { Checkpoint, PlannedRoute, RiskLevel } from '../types';
@@ -24,6 +24,9 @@ interface Point {
   mile: number;
   level: number;
   eta: string;
+  lat: number;
+  lon: number;
+  condition: string;
   reason: string;
   checkpoint: Checkpoint;
 }
@@ -47,6 +50,9 @@ function RiskChart({ route, onFocusCheckpoint }: Props) {
         mile: Math.round(checkpoint.mile),
         level: checkpoint.level,
         eta: checkpoint.eta,
+        lat: checkpoint.lat,
+        lon: checkpoint.lon,
+        condition: checkpoint.condition,
         reason: checkpoint.reason,
         checkpoint,
       })),
@@ -168,7 +174,10 @@ function RiskTooltip(props: { active?: boolean; payload?: { payload: Point }[] }
         </Box>
       </Typography>
       <Typography sx={{ ...MONO_SX, fontSize: 10, color: COLORS.textSecondary, display: 'block' }}>
-        {formatLocalDateTime(point.eta)}
+        {formatCheckpointTime(point.eta, point.lat, point.lon)}
+      </Typography>
+      <Typography sx={{ ...LABEL_SX, fontSize: 10, color: COLORS.text, display: 'block' }}>
+        {point.condition}
       </Typography>
       <Typography sx={{ fontSize: 11, color: COLORS.textSecondary }}>{point.reason}</Typography>
     </Box>

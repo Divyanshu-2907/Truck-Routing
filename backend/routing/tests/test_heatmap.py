@@ -31,15 +31,17 @@ def north_line(total_miles: float, steps: int = 20) -> list[Coordinate]:
     return [point_at_bearing(DALLAS, 0.0, total_miles * step / steps) for step in range(steps + 1)]
 
 
-def forecast_of(wind_mph: float, hours: int = 60) -> HourlyForecast:
+def forecast_of(
+    wind_mph: float, hours: int = 60, rain_in: float = 0.0, snow_in: float = 0.0
+) -> HourlyForecast:
     """A flat forecast, so any hour of the grid has the same weather."""
     start = DEPARTURE.replace(minute=0)
     times = tuple(start + timedelta(hours=offset) for offset in range(hours))
     return HourlyForecast(
         times=times,
         wind_mph=tuple(wind_mph for _ in times),
-        rain_in=tuple(0.0 for _ in times),
-        snow_in=tuple(0.0 for _ in times),
+        rain_in=tuple(rain_in for _ in times),
+        snow_in=tuple(snow_in for _ in times),
     )
 
 
@@ -172,3 +174,50 @@ class BuildHeatmapTests(unittest.TestCase):
         self.assertEqual(grid.points, [])
         self.assertEqual(len(grid.values), FORECAST_HOURS + 1)
         self.assertEqual(grid.values[0], [])
+
+
+class RawReadingTests(unittest.TestCase):
+    """The raw weather travels with the risk, as whole numbers."""
+
+    def setUp(self) -> None:
+        self.line = north_line(100.0)
+
+    def build(self, wind_mph: float, rain_in: float, snow_in: float) -> Any:
+        def fake_fetch(points, start, end, cache=None):
+            return [forecast_of(wind_mph, rain_in=rain_in, snow_in=snow_in) for _ in points]
+
+        with patch.object(heatmap_module, "fetch_hourly", fake_fetch):
+            return build_heatmap([self.line], DEPARTURE, 10_000)
+
+    def test_every_grid_has_the_same_shape_as_the_risk_grid(self) -> None:
+        grid = self.build(12.0, 0.2, 0.4)
+
+        for readings in (grid.wind, grid.rain, grid.snow):
+            self.assertEqual(len(readings), len(grid.values))
+            self.assertEqual(len(readings[0]), len(grid.points))
+
+    def test_wind_is_whole_miles_per_hour(self) -> None:
+        self.assertEqual(set(self.build(12.4, 0.0, 0.0).wind[0]), {12})
+        self.assertEqual(set(self.build(12.6, 0.0, 0.0).wind[0]), {13})
+
+    def test_rain_is_hundredths_of_an_inch(self) -> None:
+        self.assertEqual(set(self.build(0.0, 0.25, 0.0).rain[0]), {25})
+        self.assertEqual(set(self.build(0.0, 1.0, 0.0).rain[0]), {100})
+
+    def test_snow_is_tenths_of_an_inch(self) -> None:
+        self.assertEqual(set(self.build(0.0, 0.0, 1.5).snow[0]), {15})
+        self.assertEqual(set(self.build(0.0, 0.0, 3.0).snow[0]), {30})
+
+    def test_the_readings_match_the_risk_they_produced(self) -> None:
+        # 48 mph with a light load is Severe; the raw wind says why.
+        grid = self.build(48.0, 0.0, 0.0)
+
+        self.assertEqual(set(grid.values[0]), {3})
+        self.assertEqual(set(grid.wind[0]), {48})
+
+    def test_a_trip_with_no_geometry_returns_empty_grids(self) -> None:
+        grid = build_heatmap([], DEPARTURE, 10_000)
+
+        self.assertEqual(grid.wind[0], [])
+        self.assertEqual(grid.rain[0], [])
+        self.assertEqual(grid.snow[0], [])

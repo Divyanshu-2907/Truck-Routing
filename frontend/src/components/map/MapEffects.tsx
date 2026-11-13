@@ -42,7 +42,9 @@ export function FlyToFocus({ focus }: { focus: MapFocus | null }) {
 
   useEffect(() => {
     if (focus) {
-      map.flyTo([focus.lat, focus.lon], Math.max(map.getZoom(), FOCUS_ZOOM), {
+      // Never past the map's own maximum, which is where real tiles stop.
+      const zoom = Math.min(Math.max(map.getZoom(), FOCUS_ZOOM), map.getMaxZoom());
+      map.flyTo([focus.lat, focus.lon], zoom, {
         duration: 0.6,
       });
     }

@@ -49,15 +49,36 @@ FORECAST_HOURS = 48
 #: Grid points are rounded to this many decimals, matching the weather cache.
 GRID_PRECISION = 2
 
+#: Rain is sent as hundredths of an inch per hour and snow as tenths, which
+#: is finer than any threshold in the risk table and keeps them integers.
+RAIN_SCALE = 100
+SNOW_SCALE = 10
+
 
 @dataclass(frozen=True)
 class HeatmapGrid:
-    """Risk levels across the corridor, for every hour of the slider."""
+    """Conditions across the corridor, for every hour of the slider.
+
+    Every grid is indexed ``[hour][point]``. The raw readings sit alongside
+    the risk so the map can show what the weather is doing, not only how
+    dangerous it is, without asking the server again when the driver
+    switches metric.
+
+    They are whole numbers on purpose: the grid is 49 hours by a few hundred
+    points, and sending it as integers rather than floats keeps the response
+    small enough to hold every frame in the browser.
+    """
 
     times: list[datetime]
     points: list[Coordinate]
-    #: ``values[hour][point]`` is a risk level from 0 (Low) to 4 (No Travel).
+    #: Risk level from 0 (Low) to 4 (No Travel).
     values: list[list[int]]
+    #: Wind in whole miles per hour.
+    wind: list[list[int]]
+    #: Rain in hundredths of an inch per hour, so 0.25 in/hr is 25.
+    rain: list[list[int]]
+    #: Snow in tenths of an inch per hour, so 1.5 in/hr is 15.
+    snow: list[list[int]]
 
 
 def corridor_points(
@@ -122,18 +143,33 @@ def build_heatmap(
         times = [moment for moment in times if moment <= horizon] or [start]
 
     if not points:
-        return HeatmapGrid(times=times, points=[], values=[[] for _ in times])
+        empty: list[list[int]] = [[] for _ in times]
+        return HeatmapGrid(
+            times=times,
+            points=[],
+            values=empty,
+            wind=[list(row) for row in empty],
+            rain=[list(row) for row in empty],
+            snow=[list(row) for row in empty],
+        )
 
     forecasts = fetch_hourly(points, times[0], times[-1], cache=cache)
 
     values = [[0] * len(points) for _ in times]
+    wind = [[0] * len(points) for _ in times]
+    rain = [[0] * len(points) for _ in times]
+    snow = [[0] * len(points) for _ in times]
+
     for point_index, forecast in enumerate(forecasts):
         for hour_index, moment in enumerate(times):
             sample = forecast.nearest(moment)
             verdict = assess(sample.wind_mph, sample.rain_in, sample.snow_in, load_lb)
             values[hour_index][point_index] = int(verdict.level)
+            wind[hour_index][point_index] = round(sample.wind_mph)
+            rain[hour_index][point_index] = round(sample.rain_in * RAIN_SCALE)
+            snow[hour_index][point_index] = round(sample.snow_in * SNOW_SCALE)
 
-    return HeatmapGrid(times=times, points=points, values=values)
+    return HeatmapGrid(times=times, points=points, values=values, wind=wind, rain=rain, snow=snow)
 
 
 def _sample_miles(total_miles: float, spacing_miles: float) -> list[float]:

@@ -17,15 +17,21 @@ body,
 /* Esri's dark canvas is built to sit behind bright data, so on its own the
    state borders and city names are very faint, and it carries a blue cast
    that fights the graphite panels. This lifts the labels and takes the blue
-   out, without touching anything drawn on top: the tile pane holds only the
-   base map and its labels, while the routes, checkpoints and heatmap live
-   in the overlay and marker panes.
+   out, without touching anything drawn on top: only the base map and its
+   label layer are tiles, while the routes, checkpoints and heatmap live in
+   the overlay and marker panes.
+
+   The filter is on each tile image rather than on the tile pane. Filtering
+   the pane promotes the whole thing to one composited layer, which the
+   browser then scales as a single bitmap during a zoom instead of redrawing
+   it - which is what made the city labels look huge and blurry. Filtering
+   the images leaves each tile its own element, so each is redrawn sharp.
 
    Measured on real tiles at zoom 6, 8 and 10 over Dallas: the gap between
    label pixels and the ground behind them stays at about 87 of 255, the
    same as before the grayscale, while the blue-over-red cast on the
    background drops from +3.1 to +0.05. */
-.leaflet-tile-pane {
+.leaflet-tile {
   filter: grayscale(0.6) brightness(1.3) contrast(1.1);
 }
 

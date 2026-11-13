@@ -1,15 +1,17 @@
 import Box from '@mui/material/Box';
 import { memo, useMemo } from 'react';
-import { MapContainer, Polyline, TileLayer } from 'react-leaflet';
+import { MapContainer, TileLayer } from 'react-leaflet';
 
 import { COLORS } from '../theme';
 import type { HeatmapResponse, PlanResponse, Place } from '../types';
+import type { HeatmapMetric } from '../heatmapMetrics';
 import { HeatmapLayer } from './HeatmapLayer';
 import { Legend } from './Legend';
 import { CheckpointMarker } from './map/CheckpointMarkers';
 import { EndpointMarker } from './map/EndpointMarker';
 import { FitToPlan, FlyToFocus, type MapFocus } from './map/MapEffects';
 import { RouteSegments } from './map/RouteSegments';
+import { UnselectedRoute } from './map/UnselectedRoute';
 import { nearestCheckpointMile } from './map/truckPosition';
 
 /** Centre and zoom that frame the continental United States. */
@@ -41,24 +43,30 @@ const LABEL_TILE_URL = `${ESRI_CANVAS}/World_Dark_Gray_Reference/MapServer/tile/
 const TILE_ATTRIBUTION =
   'Tiles &copy; <a href="https://www.esri.com/">Esri</a> &mdash; map data ' +
   '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
-const TILE_MAX_ZOOM = 16;
 
 /**
- * Both tile layers share Leaflet's tilePane, and these order them inside it:
- * the labels sit above the base tiles. The whole tilePane is painted below
- * the overlay pane, which is where the heatmap canvas and the route lines
- * go, and below the marker pane - so the place names never cover a route,
+ * Esri's canvas is cached to zoom 16. Ask for 17 and the service answers
+ * 200 with a pale "Map data not yet available" placeholder rather than a
+ * 404, so Leaflet would happily draw it over the map.
+ *
+ * `maxNativeZoom` records where the real tiles stop, and the map's own
+ * `maxZoom` is held at the same level so nothing is ever stretched: at 16
+ * individual streets are already visible, which is as close as a route
+ * checkpoint needs.
+ */
+/**
+ * Both tile layers share Leaflet's tilePane, and these order them inside
+ * it: the labels sit above the base tiles. The whole tilePane is painted
+ * below the overlay pane, which holds the heatmap canvas and the route
+ * lines, and below the marker pane - so place names never cover a route,
  * a checkpoint or the heat.
  */
 const BASE_TILE_Z_INDEX = 1;
 const LABEL_TILE_Z_INDEX = 2;
 
-/**
- * Unselected routes: a dashed grey line, the way a map shows a road you are
- * not on. Dashes keep them readable over the heatmap without needing the
- * weight or the colour that would make them compete with the chosen route.
- */
-const OTHER_LINE = { color: COLORS.muted, weight: 3, opacity: 0.9, dashArray: '6 4' };
+const TILE_MAX_NATIVE_ZOOM = 16;
+const MAP_MAX_ZOOM = 16;
+const MAP_MIN_ZOOM = 3;
 
 interface Props {
   plan: PlanResponse | null;
@@ -69,6 +77,7 @@ interface Props {
   heatmap: HeatmapResponse | null;
   hourIndex: number;
   heatmapVisible: boolean;
+  heatmapMetric: HeatmapMetric;
   focus: MapFocus | null;
 }
 
@@ -90,6 +99,7 @@ export function MapView({
   heatmap,
   hourIndex,
   heatmapVisible,
+  heatmapMetric,
   focus,
 }: Props) {
   const currentTime = heatmap?.times[hourIndex] ?? null;
@@ -99,7 +109,8 @@ export function MapView({
       <MapContainer
         center={USA_CENTER}
         zoom={USA_ZOOM}
-        minZoom={3}
+        minZoom={MAP_MIN_ZOOM}
+        maxZoom={MAP_MAX_ZOOM}
         scrollWheelZoom
         preferCanvas
         zoomControl={false}
@@ -108,17 +119,24 @@ export function MapView({
         <TileLayer
           url={TILE_URL}
           attribution={TILE_ATTRIBUTION}
-          maxZoom={TILE_MAX_ZOOM}
+          maxZoom={MAP_MAX_ZOOM}
+          maxNativeZoom={TILE_MAX_NATIVE_ZOOM}
           zIndex={BASE_TILE_Z_INDEX}
         />
         {/* Place names: the base layer carries none of its own. */}
         <TileLayer
           url={LABEL_TILE_URL}
-          maxZoom={TILE_MAX_ZOOM}
+          maxZoom={MAP_MAX_ZOOM}
+          maxNativeZoom={TILE_MAX_NATIVE_ZOOM}
           zIndex={LABEL_TILE_Z_INDEX}
         />
 
-        <HeatmapLayer heatmap={heatmap} hourIndex={hourIndex} visible={heatmapVisible} />
+        <HeatmapLayer
+          heatmap={heatmap}
+          hourIndex={hourIndex}
+          visible={heatmapVisible}
+          metric={heatmapMetric}
+        />
 
         {plan ? (
           <>
@@ -134,7 +152,7 @@ export function MapView({
         <FlyToFocus focus={focus} />
       </MapContainer>
 
-      <Legend />
+      <Legend metric={heatmapMetric} heatmapVisible={heatmapVisible} />
     </Box>
   );
 }
@@ -162,11 +180,11 @@ const RouteLines = memo(function RouteLines({
       {/* Unselected routes are drawn first so the selected one sits on top. */}
       {plan.routes.map((route, index) =>
         index === selectedIndex ? null : (
-          <Polyline
+          <UnselectedRoute
             key={route.label}
             positions={route.geometry}
-            pathOptions={OTHER_LINE}
-            eventHandlers={{ click: () => onSelectRoute(index) }}
+            label={route.label}
+            onSelect={() => onSelectRoute(index)}
           />
         ),
       )}

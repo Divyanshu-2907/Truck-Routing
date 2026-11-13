@@ -2,7 +2,7 @@ import type { PathOptions } from 'leaflet';
 import { memo } from 'react';
 import { CircleMarker, Popup, Tooltip } from 'react-leaflet';
 
-import { formatLocalDateTime } from '../../format';
+import { formatCheckpointTime } from '../../format';
 import { RISK_COLORS, RISK_OUTLINE } from '../../riskScale';
 import { COLORS, FONT_MONO } from '../../theme';
 import type { Checkpoint, RiskLevel } from '../../types';
@@ -61,9 +61,9 @@ function CheckpointMarkerView({ checkpoint, isTruckHere }: Props) {
           <strong style={{ fontFamily: FONT_MONO }}>
             MM {Math.round(checkpoint.mile).toLocaleString()}
           </strong>{' '}
-          · {checkpoint.level_label}
+          · {checkpoint.condition} · {checkpoint.level_label}
           <br />
-          Arrives {formatLocalDateTime(checkpoint.eta)}
+          Arrives {formatCheckpointTime(checkpoint.eta, checkpoint.lat, checkpoint.lon)}
           <br />
           Wind {checkpoint.wind_mph.toFixed(1)} mph · Rain {checkpoint.rain_in.toFixed(2)} in/hr ·
           Snow {checkpoint.snow_in.toFixed(2)} in/hr

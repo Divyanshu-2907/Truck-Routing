@@ -1,7 +1,7 @@
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 
-import { formatLocalDateTime } from '../format';
+import { formatCheckpointTime } from '../format';
 import { RISK_COLORS, RISK_LABELS, riskScore, riskScoreLevel } from '../riskScale';
 import { COLORS, LABEL_SX, MONO_SX } from '../theme';
 import type { PlannedRoute } from '../types';
@@ -19,7 +19,9 @@ interface Props {
  */
 export function StatTiles({ route }: Props) {
   const { summary } = route;
-  const arrival = route.checkpoints.at(-1)?.eta;
+  // The last checkpoint is the destination, so its arrival is shown in
+  // the destination's local time, not the driver's.
+  const destination = route.checkpoints.at(-1);
   const score = riskScore(summary.average_risk);
   const scoreLevel = riskScoreLevel(summary.average_risk);
 
@@ -42,7 +44,11 @@ export function StatTiles({ route }: Props) {
       />
       <Tile
         label="Arrival"
-        value={arrival ? formatLocalDateTime(arrival) : '—'}
+        value={
+          destination
+            ? formatCheckpointTime(destination.eta, destination.lat, destination.lon)
+            : '—'
+        }
         note={`${summary.checkpoint_count} checkpoints sampled`}
         span={2}
         small
