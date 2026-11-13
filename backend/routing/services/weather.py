@@ -62,7 +62,7 @@ ProviderName = Literal["open-meteo", "met-norway"]
 #: a way to reach whoever runs it. Point this at the project's repository.
 MET_NORWAY_USER_AGENT = os.environ.get(
     "MET_NORWAY_USER_AGENT",
-    "WeatherAwareTruckRouting/1.0 (github.com/dk290/truck-routing)",
+    "WeatherAwareTruckRouting/1.0 (+https://github.com/Divyanshu-2907/Truck-Routing)",
 )
 
 #: MET Norway answers one location per request, so they go out in parallel.
@@ -102,6 +102,11 @@ MM_PER_INCH = 25.4
 
 #: Metres per second to miles per hour, for MET Norway's wind.
 MPH_PER_METRE_PER_SECOND = 2.236936
+
+#: Set ``WEATHER_FORCE_FALLBACK=1`` to skip Open-Meteo and use MET Norway
+#: for everything. Off by default; it exists so the fallback can be seen
+#: working locally without waiting for a real quota refusal.
+FORCE_FALLBACK_VARIABLE = "WEATHER_FORCE_FALLBACK"
 
 #: How long to stop trying Open-Meteo after it has refused.
 #:
@@ -250,6 +255,10 @@ def _fetch_cells(
     cache: Cache | None,
 ) -> tuple[dict[Coordinate, HourlyForecast], ProviderName]:
     """Ask Open-Meteo, and fall back to MET Norway only if it refuses."""
+    if _force_fallback():
+        logger.info("%s is set: using MET Norway for everything", FORCE_FALLBACK_VARIABLE)
+        return _met_norway_cells(cells, window, cache), "met-norway"
+
     if not _recently_refused(cache):
         try:
             return _open_meteo_cells(cells, window, cache), "open-meteo"
@@ -261,6 +270,12 @@ def _fetch_cells(
             _remember_refusal(cache)
 
     return _met_norway_cells(cells, window, cache), "met-norway"
+
+
+def _force_fallback() -> bool:
+    """Whether the environment says to use the fallback for everything."""
+    raw = os.environ.get(FORCE_FALLBACK_VARIABLE, "")
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _refusal_key() -> str:

@@ -6,6 +6,7 @@ parsing is tested against the shape the service actually returns.
 
 from __future__ import annotations
 
+import os
 import unittest
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -17,6 +18,7 @@ from routing.services import weather as weather_module
 from routing.services.geo import Coordinate
 from routing.services.http_client import ExternalServiceError
 from routing.services.weather import (
+    FORCE_FALLBACK_VARIABLE,
     MM_PER_INCH,
     MPH_PER_METRE_PER_SECOND,
     PROVIDER_COOLDOWN_SECONDS,
@@ -159,7 +161,9 @@ class FallbackTests(MetTestCase):
 
         agent = self.sent_headers[-1]["User-Agent"]
         self.assertIn("WeatherAwareTruckRouting", agent)
-        self.assertIn("github.com", agent)
+        # MET Norway can block a contact that does not resolve, so the
+        # default has to be the repository that actually exists.
+        self.assertIn("https://github.com/Divyanshu-2907/Truck-Routing", agent)
 
     def test_coordinates_are_sent_to_four_decimals(self) -> None:
         captured: list[dict[str, Any]] = []
@@ -314,3 +318,46 @@ class CachingTests(MetTestCase):
         stored = [value for key, value in cache.store.items() if "weather-provider" in key]
         self.assertEqual(stored, [True])
         self.assertLessEqual(PROVIDER_COOLDOWN_SECONDS, 60 * 60)
+
+
+class ForcedFallbackTests(MetTestCase):
+    """An environment switch for seeing the fallback without a real refusal."""
+
+    def test_the_switch_skips_open_meteo_entirely(self) -> None:
+        with patch.dict(os.environ, {FORCE_FALLBACK_VARIABLE: "1"}):
+            with patch.object(requests, "get", self.fake_get([])):
+                batch = fetch_hourly([DALLAS], START, END)
+
+        self.assertEqual(batch.source, "met-norway")
+        self.assertEqual([url for url in self.urls if "open-meteo" in url], [])
+
+    def test_it_is_off_unless_it_is_set(self) -> None:
+        open_meteo = {
+            "hourly_units": {"snowfall": "inch"},
+            "hourly": {
+                "time": ["2026-01-02T06:00"],
+                "wind_speed_10m": [5.0],
+                "rain": [0.0],
+                "showers": [0.0],
+                "snowfall": [0.0],
+            },
+        }
+
+        def _get(url: str, params: Any = None, headers: Any = None, timeout: Any = None):
+            self.urls.append(url)
+            return FakeResponse([open_meteo])
+
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop(FORCE_FALLBACK_VARIABLE, None)
+            with patch.object(requests, "get", _get):
+                batch = fetch_hourly([DALLAS], START, END)
+
+        self.assertEqual(batch.source, "open-meteo")
+
+    def test_an_unset_or_empty_value_is_not_treated_as_on(self) -> None:
+        with patch.dict(os.environ, {FORCE_FALLBACK_VARIABLE: ""}):
+            self.assertFalse(weather_module._force_fallback())
+        with patch.dict(os.environ, {FORCE_FALLBACK_VARIABLE: "0"}):
+            self.assertFalse(weather_module._force_fallback())
+        with patch.dict(os.environ, {FORCE_FALLBACK_VARIABLE: "true"}):
+            self.assertTrue(weather_module._force_fallback())
