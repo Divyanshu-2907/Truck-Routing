@@ -32,16 +32,23 @@ from .geo import (
 )
 from .http_client import Cache
 from .risk import assess
-from .weather import fetch_hourly
+from .weather import fetch_hourly, forecast_window
 
 #: How far apart corridor samples are along each route.
-CORRIDOR_SPACING_MILES = 25.0
+CORRIDOR_SPACING_MILES = 50.0
 
-#: How far out to either side of the road the corridor reaches.
-CORRIDOR_OFFSET_MILES = 30.0
+#: How far out to either side of the road the corridor reaches. Wider than
+#: the spacing, so the band still has shape with fewer points in it.
+CORRIDOR_OFFSET_MILES = 40.0
 
-#: Upper limit on grid points, which keeps the weather lookup to four batches.
-MAX_CORRIDOR_POINTS = 400
+#: Upper limit on grid points.
+#:
+#: The weather quota counts locations, not requests, so this is the single
+#: biggest lever on what a trip costs. A heatmap is read as a wash of
+#: colour over a corridor hundreds of miles long; at this spacing it still
+#: reads that way, and a coast-to-coast trip cannot run the quota down on
+#: its own.
+MAX_CORRIDOR_POINTS = 120
 
 #: The forecast slider covers the departure hour plus the next 48 hours.
 FORECAST_HOURS = 48
@@ -121,6 +128,7 @@ def build_heatmap(
     *,
     hours: int = FORECAST_HOURS,
     horizon: datetime | None = None,
+    now: datetime | None = None,
     cache: Cache | None = None,
 ) -> HeatmapGrid:
     """Score the corridor for every hour from departure to ``hours`` later.
@@ -153,7 +161,10 @@ def build_heatmap(
             snow=[list(row) for row in empty],
         )
 
-    forecasts = fetch_hourly(points, times[0], times[-1], cache=cache)
+    # The same window the plan asked for, so every point it already looked
+    # up is served from the cache instead of being charged again.
+    window = forecast_window(departure, times[-1], now or datetime.now(UTC))
+    forecasts = fetch_hourly(points, window[0], window[1], cache=cache)
 
     values = [[0] * len(points) for _ in times]
     wind = [[0] * len(points) for _ in times]

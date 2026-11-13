@@ -19,6 +19,7 @@ every response and converted if Open-Meteo answers in centimetres.
 
 from __future__ import annotations
 
+import logging
 from bisect import bisect_left
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -28,6 +29,8 @@ from typing import Any
 
 from .geo import Coordinate
 from .http_client import Cache, ExternalServiceError, fetch_json, make_cache_key
+
+logger = logging.getLogger(__name__)
 
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
 
@@ -42,11 +45,20 @@ CHUNK_SIZE = 100
 #: How many chunks to fetch at the same time.
 MAX_PARALLEL_REQUESTS = 4
 
-#: Forecasts are refreshed every half hour.
-WEATHER_CACHE_SECONDS = 30 * 60
+#: Forecasts are refreshed every hour.
+WEATHER_CACHE_SECONDS = 60 * 60
 
-#: Two decimal places of latitude is roughly 0.7 miles.
-COORDINATE_PRECISION = 2
+#: Lookups are snapped to a tenth of a degree, about 7 miles.
+#:
+#: The free tier counts every location in a request as a call, so the
+#: number of distinct points is what has to come down. Snapping finer than
+#: this buys nothing anyway: Open-Meteo's models run on a grid of roughly
+#: 11 km, so two points inside one cell return the same forecast.
+COORDINATE_PRECISION = 1
+
+#: Both the plan and the heatmap ask for at least this many hours, so they
+#: land on the same cache entries and the second of the two is mostly free.
+SHARED_WINDOW_HOURS = 48
 
 #: Multipliers that bring Open-Meteo's snowfall units to inches per hour.
 SNOWFALL_TO_INCHES = {"inch": 1.0, "in": 1.0, "cm": 0.393_700_787, "mm": 0.039_370_079}
@@ -93,6 +105,28 @@ class HourlyForecast:
         return position if (after - when) < (when - before) else position - 1
 
 
+def forecast_window(
+    departure: datetime, latest_needed: datetime, now: datetime
+) -> tuple[datetime, datetime]:
+    """The hours to ask for, the same for the plan and for the heatmap.
+
+    Both always cover at least the slider's 48 hours, even when the drive
+    is shorter, so the two requests produce identical cache keys and the
+    heatmap costs nothing for any point the plan already looked up. Hours
+    are free - the quota counts locations - so asking for more of them is
+    the cheapest way to make that sharing work.
+
+    A drive longer than 48 hours extends the window, and only then do the
+    two stop lining up.
+    """
+    start = departure.astimezone(UTC).replace(minute=0, second=0, microsecond=0)
+    # Both ends land on whole hours, so two callers reaching the same hour
+    # by different arithmetic still produce the same cache key.
+    needed = latest_needed.astimezone(UTC).replace(minute=0, second=0, microsecond=0)
+    end = max(start + timedelta(hours=SHARED_WINDOW_HOURS), needed)
+    return start, min(end, forecast_horizon(now))
+
+
 def forecast_horizon(now: datetime) -> datetime:
     """The last hour Open-Meteo will return a forecast for.
 
@@ -131,6 +165,16 @@ def fetch_hourly(
             found[point] = cached
         else:
             missing.append(point)
+
+    logger.info(
+        "weather: %d points -> %d locations (%d cached, %d fetched) for %s to %s",
+        len(points),
+        len(found) + len(missing),
+        len(found),
+        len(missing),
+        window[0].isoformat(timespec="hours"),
+        window[1].isoformat(timespec="hours"),
+    )
 
     if missing:
         _fetch_missing(missing, window, found, cache)

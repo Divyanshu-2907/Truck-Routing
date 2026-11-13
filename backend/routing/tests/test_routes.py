@@ -15,6 +15,7 @@ from unittest.mock import patch
 
 import requests
 
+from routing.services import http_client
 from routing.services.geo import (
     Coordinate,
     cumulative_miles,
@@ -66,9 +67,12 @@ def osrm_payload(*routes: dict[str, Any]) -> dict[str, Any]:
 class FakeResponse:
     """The handful of ``requests.Response`` members that ``fetch_json`` uses."""
 
-    def __init__(self, payload: Any, status_code: int = 200) -> None:
+    def __init__(
+        self, payload: Any, status_code: int = 200, headers: dict[str, str] | None = None
+    ) -> None:
         self._payload = payload
         self.status_code = status_code
+        self.headers = headers or {}
 
     def json(self) -> Any:
         return self._payload
@@ -402,7 +406,17 @@ class DetourDirectionTests(RoutesTestCase):
 
 
 class RateLimitTests(RoutesTestCase):
-    def test_a_429_is_retried_once(self) -> None:
+    """Rate limits are waited out briefly, then reported plainly."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        # The waits are real seconds; the tests only care that they happen.
+        self.slept: list[float] = []
+        sleeping = patch.object(http_client.time, "sleep", self.slept.append)
+        sleeping.start()
+        self.addCleanup(sleeping.stop)
+
+    def test_a_429_is_retried(self) -> None:
         ok = osrm_payload(osrm_route(800, 13.0, line_between(DALLAS, DENVER)))
         with patch.object(requests, "get", self.fake_get([FakeResponse({}, status_code=429), ok])):
             routes = get_routes(DALLAS, DENVER)
@@ -410,12 +424,50 @@ class RateLimitTests(RoutesTestCase):
         self.assertEqual(routes[0].label, "Route A")
 
     def test_a_persistent_429_says_the_service_is_busy(self) -> None:
-        busy = FakeResponse({}, status_code=429)
-        with patch.object(requests, "get", self.fake_get([busy, busy])):
+        busy = [FakeResponse({}, status_code=429) for _ in range(6)]
+        with patch.object(requests, "get", self.fake_get(busy)):
             with self.assertRaises(ExternalServiceError) as caught:
                 get_routes(DALLAS, DENVER)
 
         self.assertIn("too many requests", str(caught.exception))
+        # The first attempt plus the rate-limit retries, and no more.
+        self.assertEqual(len(self.requested_urls), http_client.RATE_LIMIT_RETRIES + 1)
+
+    def test_retry_after_is_honoured(self) -> None:
+        ok = osrm_payload(osrm_route(800, 13.0, line_between(DALLAS, DENVER)))
+        busy = FakeResponse({}, status_code=429, headers={"Retry-After": "3"})
+        with patch.object(requests, "get", self.fake_get([busy, ok])):
+            get_routes(DALLAS, DENVER)
+
+        self.assertEqual(self.slept, [3.0])
+
+    def test_a_long_retry_after_is_not_waited_out(self) -> None:
+        busy = [FakeResponse({}, status_code=429, headers={"Retry-After": "600"}) for _ in range(4)]
+        with patch.object(requests, "get", self.fake_get(busy)):
+            with self.assertRaises(ExternalServiceError):
+                get_routes(DALLAS, DENVER)
+
+        # Capped at the ceiling, and never actually slept for that long.
+        self.assertEqual(self.slept, [])
+        self.assertEqual(len(self.requested_urls), 1)
+
+    def test_a_daily_quota_says_so_instead_of_asking_for_patience(self) -> None:
+        exhausted = FakeResponse(
+            {
+                "error": True,
+                "reason": "Daily API request limit exceeded. Please try again tomorrow.",
+            },
+            status_code=429,
+        )
+        with patch.object(requests, "get", self.fake_get([exhausted])):
+            with self.assertRaises(ExternalServiceError) as caught:
+                get_routes(DALLAS, DENVER)
+
+        message = str(caught.exception)
+        self.assertIn("daily free quota", message)
+        self.assertNotIn("in a moment", message)
+        # Waiting cannot fix it, so nothing is retried.
+        self.assertEqual(len(self.requested_urls), 1)
 
 
 class DetourOffsetTests(unittest.TestCase):

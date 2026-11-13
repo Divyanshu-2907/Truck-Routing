@@ -18,10 +18,12 @@ from routing.services.geo import Coordinate
 from routing.services.http_client import ExternalServiceError
 from routing.services.weather import (
     CHUNK_SIZE,
+    SHARED_WINDOW_HOURS,
     HourlyForecast,
     _hour_window,
     fetch_hourly,
     forecast_horizon,
+    forecast_window,
 )
 
 START = datetime(2026, 1, 2, 6, 0, tzinfo=UTC)
@@ -295,3 +297,124 @@ class ArrivalTimeTests(unittest.TestCase):
         arrival = datetime(2026, 1, 2, 20, 10, tzinfo=india)
 
         self.assertEqual(forecast.nearest(arrival).wind_mph, 15.0)
+
+
+class LocationCountTests(WeatherTestCase):
+    """The free tier charges per location, so distinct points are the cost."""
+
+    def test_points_in_one_grid_cell_are_charged_once(self) -> None:
+        # A tenth of a degree is about 7 miles. Checkpoints every mile along
+        # a road therefore share a handful of lookups, not one each.
+        points: list[Coordinate] = [(-96.80 + index * 0.014, 32.80) for index in range(20)]
+        payload = hourly_block()
+        with patch.object(requests, "get", self.fake_get(lambda count: [payload] * count)):
+            forecasts = fetch_hourly(points, START, END)
+
+        asked = len(self.calls[0]["latitude"].split(","))
+        self.assertEqual(len(forecasts), 20)
+        self.assertLessEqual(asked, 4)
+
+    def test_the_three_routes_share_one_lookup_where_they_run_together(self) -> None:
+        shared: list[Coordinate] = [(-96.8 + index * 0.2, 32.8) for index in range(5)]
+        # Three routes leaving town on the same road, then diverging.
+        points = shared * 3 + [(-100.0, 35.0), (-100.5, 35.5)]
+        payload = hourly_block()
+        with patch.object(requests, "get", self.fake_get(lambda count: [payload] * count)):
+            fetch_hourly(points, START, END)
+
+        self.assertEqual(len(self.calls[0]["latitude"].split(",")), 7)
+
+    def test_every_point_still_gets_its_own_forecast_back(self) -> None:
+        points: list[Coordinate] = [(-96.80, 32.80), (-96.801, 32.801), (-99.0, 35.0)]
+
+        def payload_for(count: int) -> list[dict[str, Any]]:
+            return [hourly_block(snow_values=[float(index)] * 12) for index in range(count)]
+
+        with patch.object(requests, "get", self.fake_get(payload_for)):
+            forecasts = fetch_hourly(points, START, END)
+
+        self.assertEqual(len(forecasts), 3)
+        # The first two round to the same cell, so they share a forecast.
+        self.assertEqual(forecasts[0].snow_in[0], forecasts[1].snow_in[0])
+        self.assertNotEqual(forecasts[0].snow_in[0], forecasts[2].snow_in[0])
+
+
+class SharedWindowTests(unittest.TestCase):
+    """The plan and the heatmap must ask for the same hours to share a cache."""
+
+    def setUp(self) -> None:
+        self.now = datetime(2026, 1, 2, 5, 0, tzinfo=UTC)
+        self.departure = datetime(2026, 1, 2, 6, 30, tzinfo=UTC)
+
+    def test_a_short_drive_still_asks_for_the_full_slider_window(self) -> None:
+        arrival = self.departure + timedelta(hours=3)
+
+        start, end = forecast_window(self.departure, arrival, self.now)
+
+        self.assertEqual(start, self.departure.replace(minute=0))
+        self.assertEqual(end, start + timedelta(hours=SHARED_WINDOW_HOURS))
+
+    def test_the_plan_and_the_heatmap_agree_for_a_normal_trip(self) -> None:
+        plan = forecast_window(self.departure, self.departure + timedelta(hours=14), self.now)
+        heatmap = forecast_window(
+            self.departure, self.departure + timedelta(hours=SHARED_WINDOW_HOURS), self.now
+        )
+
+        self.assertEqual(plan, heatmap)
+
+    def test_a_drive_longer_than_the_window_extends_it(self) -> None:
+        arrival = self.departure + timedelta(hours=58)
+
+        _start, end = forecast_window(self.departure, arrival, self.now)
+
+        self.assertEqual(end, arrival.replace(minute=0))
+
+    def test_the_window_never_runs_past_the_forecast(self) -> None:
+        late = forecast_horizon(self.now) - timedelta(hours=2)
+
+        _start, end = forecast_window(late, late + timedelta(hours=40), self.now)
+
+        self.assertEqual(end, forecast_horizon(self.now))
+
+
+class CacheReuseTests(WeatherTestCase):
+    """The second request of a pair should mostly be free."""
+
+    class DictCache:
+        def __init__(self) -> None:
+            self.store: dict[str, Any] = {}
+
+        def get(self, key: str) -> Any:
+            return self.store.get(key)
+
+        def set(self, key: str, value: Any, timeout: int | None = None) -> None:
+            self.store[key] = value
+
+    def test_a_later_request_only_pays_for_points_it_adds(self) -> None:
+        cache = self.DictCache()
+        plan_points: list[Coordinate] = [(-96.8 + index * 0.2, 32.8) for index in range(5)]
+        # The heatmap covers the same road plus a band either side of it.
+        heatmap_points = plan_points + [(-96.8 + index * 0.2, 33.4) for index in range(5)]
+        payload = hourly_block()
+
+        with patch.object(requests, "get", self.fake_get(lambda count: [payload] * count)):
+            fetch_hourly(plan_points, START, END, cache=cache)
+            fetch_hourly(heatmap_points, START, END, cache=cache)
+
+        self.assertEqual(len(self.calls[0]["latitude"].split(",")), 5)
+        # Only the five new cells are charged for the second time round.
+        self.assertEqual(len(self.calls[1]["latitude"].split(",")), 5)
+
+    def test_a_different_window_cannot_reuse_the_cache(self) -> None:
+        cache = self.DictCache()
+        points: list[Coordinate] = [(-96.8, 32.8)]
+        payload = hourly_block()
+
+        with patch.object(requests, "get", self.fake_get(lambda count: [payload] * count)):
+            fetch_hourly(points, START, END, cache=cache)
+            fetch_hourly(
+                points, START + timedelta(hours=12), END + timedelta(hours=12), cache=cache
+            )
+
+        # Which is exactly why both callers ask for the same hours.
+        self.assertEqual(len(self.calls), 2)

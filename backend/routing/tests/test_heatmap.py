@@ -17,6 +17,7 @@ from routing.services.geo import Coordinate, haversine_miles, point_at_bearing
 from routing.services.heatmap import (
     CORRIDOR_OFFSET_MILES,
     FORECAST_HOURS,
+    MAX_CORRIDOR_POINTS,
     build_heatmap,
     corridor_points,
 )
@@ -48,11 +49,18 @@ def forecast_of(
 class CorridorPointsTests(unittest.TestCase):
     def test_every_sample_has_a_left_and_a_right_point(self) -> None:
         # 100 miles sampled every 25 gives 5 samples, each with 2 neighbours.
-        points = corridor_points([north_line(100.0)])
+        points = corridor_points([north_line(100.0)], spacing_miles=25.0)
         self.assertEqual(len(points), 15)
 
+    def test_the_default_spacing_keeps_a_long_trip_inside_the_cap(self) -> None:
+        # The weather quota counts locations, so this is the ceiling that
+        # stops a coast-to-coast trip exhausting it on its own.
+        points = corridor_points([north_line(3_000.0, steps=400)] * 3)
+
+        self.assertLessEqual(len(points), MAX_CORRIDOR_POINTS)
+
     def test_side_points_sit_beside_the_road(self) -> None:
-        points = corridor_points([north_line(100.0)])
+        points = corridor_points([north_line(100.0)], spacing_miles=25.0)
         centre, left, right = points[0], points[1], points[2]
 
         self.assertAlmostEqual(haversine_miles(centre, left), CORRIDOR_OFFSET_MILES, delta=1.0)
@@ -63,8 +71,8 @@ class CorridorPointsTests(unittest.TestCase):
 
     def test_routes_that_run_together_share_points(self) -> None:
         line = north_line(100.0)
-        one_route = corridor_points([line])
-        same_route_twice = corridor_points([line, line])
+        one_route = corridor_points([line], spacing_miles=25.0)
+        same_route_twice = corridor_points([line, line], spacing_miles=25.0)
 
         self.assertEqual(one_route, same_route_twice)
 

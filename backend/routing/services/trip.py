@@ -33,7 +33,13 @@ from .planner import (
     score_route,
 )
 from .routes import RouteOption, checkpoint_eta, get_routes
-from .weather import MAX_FORECAST_DAYS, WeatherSample, fetch_hourly, forecast_horizon
+from .weather import (
+    MAX_FORECAST_DAYS,
+    WeatherSample,
+    fetch_hourly,
+    forecast_horizon,
+    forecast_window,
+)
 
 
 class PlanningError(ValueError):
@@ -98,7 +104,9 @@ def plan_trip(
     _check_trip_is_forecastable(arrivals_per_route, moment)
 
     after_routes = perf_counter()
-    samples_per_route = _fetch_weather(checkpoints_per_route, arrivals_per_route, departure, cache)
+    samples_per_route = _fetch_weather(
+        checkpoints_per_route, arrivals_per_route, departure, moment, cache
+    )
     after_weather = perf_counter()
 
     scored = [
@@ -152,6 +160,7 @@ def _fetch_weather(
     checkpoints_per_route: Sequence[Sequence[Checkpoint]],
     arrivals_per_route: Sequence[Sequence[datetime]],
     departure: datetime,
+    now: datetime,
     cache: Cache | None,
 ) -> list[list[WeatherSample]]:
     """One batched forecast lookup covering every checkpoint of every route."""
@@ -162,7 +171,8 @@ def _fetch_weather(
     ]
     arrivals = [moment for arrivals in arrivals_per_route for moment in arrivals]
 
-    forecasts = fetch_hourly(points, departure, max(arrivals), cache=cache)
+    window = forecast_window(departure, max(arrivals), now)
+    forecasts = fetch_hourly(points, window[0], window[1], cache=cache)
 
     # Hand each route back the slice of forecasts belonging to its checkpoints.
     samples_per_route: list[list[WeatherSample]] = []
@@ -227,5 +237,6 @@ def trip_heatmap(
         departure,
         load_lb,
         horizon=forecast_horizon(moment),
+        now=moment,
         cache=cache,
     )
