@@ -76,12 +76,22 @@ export type DecidingCriterion =
   | 'tie'
   | 'only_route';
 
+/**
+ * Which service supplied the weather.
+ *
+ * Open-Meteo is the usual one. MET Norway is the fallback, used when
+ * Open-Meteo refuses - which on shared free hosting can happen because of
+ * other apps on the same address, not because of anything this app did.
+ */
+export type WeatherSource = 'open-meteo' | 'met-norway';
+
 export interface PlanResponse {
   routes: PlannedRoute[];
   recommended_index: number;
   recommendation_reason: string;
   deciding_criterion: DecidingCriterion;
   generated_at: string;
+  weather_source: WeatherSource;
 }
 
 export interface PlanRequest {
@@ -113,6 +123,7 @@ export interface HeatmapResponse {
   rain: number[][];
   /** snow[hour][point] = tenths of an inch per hour, so 15 is 1.5. */
   snow: number[][];
+  weather_source: WeatherSource;
 }
 
 export interface HeatmapRequest {

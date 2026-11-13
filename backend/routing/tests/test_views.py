@@ -169,8 +169,10 @@ class PlanResponseShapeTests(ApiTestCase):
                 "recommendation_reason",
                 "deciding_criterion",
                 "generated_at",
+                "weather_source",
             },
         )
+        self.assertEqual(body["weather_source"], "open-meteo")
         route = body["routes"][0]
         self.assertEqual(set(route), {"label", "source", "geometry", "summary", "checkpoints"})
         self.assertEqual(
@@ -201,6 +203,7 @@ class HeatmapEndpointTests(ApiTestCase):
         self.assertEqual(len(grid["times"]), 49)
         self.assertEqual(len(grid["values"]), 49)
         self.assertEqual(len(grid["values"][0]), len(grid["points"]))
+        self.assertEqual(grid["weather_source"], "open-meteo")
 
         # The raw readings come back beside the risk, on the same grid, so
         # the map can switch metric without asking the server again.

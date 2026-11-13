@@ -106,14 +106,14 @@ class UnitConversionTests(WeatherTestCase):
     def test_centimetres_are_converted_to_inches(self) -> None:
         payload = hourly_block(snow_unit="cm", snow_values=[2.54] * 12)
         with patch.object(requests, "get", self.fake_get(lambda count: [payload] * count)):
-            forecast = fetch_hourly([(-96.8, 32.8)], START, END)[0]
+            forecast = fetch_hourly([(-96.8, 32.8)], START, END).forecasts[0]
 
         self.assertAlmostEqual(forecast.snow_in[0], 1.0, places=3)
 
     def test_inches_are_left_alone(self) -> None:
         payload = hourly_block(snow_unit="inch", snow_values=[1.5] * 12)
         with patch.object(requests, "get", self.fake_get(lambda count: [payload] * count)):
-            forecast = fetch_hourly([(-96.8, 32.8)], START, END)[0]
+            forecast = fetch_hourly([(-96.8, 32.8)], START, END).forecasts[0]
 
         self.assertAlmostEqual(forecast.snow_in[0], 1.5, places=6)
 
@@ -121,7 +121,7 @@ class UnitConversionTests(WeatherTestCase):
         payload = hourly_block()
         payload["hourly"]["rain"] = [None] * 12
         with patch.object(requests, "get", self.fake_get(lambda count: [payload] * count)):
-            forecast = fetch_hourly([(-96.8, 32.8)], START, END)[0]
+            forecast = fetch_hourly([(-96.8, 32.8)], START, END).forecasts[0]
 
         self.assertEqual(forecast.rain_in[0], 0.0)
 
@@ -144,7 +144,7 @@ class BatchingTests(WeatherTestCase):
         points: list[Coordinate] = [(-96.0 - index * 0.1, 32.0) for index in range(250)]
         payload = hourly_block()
         with patch.object(requests, "get", self.fake_get(lambda count: [payload] * count)):
-            forecasts = fetch_hourly(points, START, END)
+            forecasts = fetch_hourly(points, START, END).forecasts
 
         self.assertEqual(len(forecasts), 250)
         self.assertEqual(len(self.calls), 3)  # 100 + 100 + 50
@@ -155,7 +155,7 @@ class BatchingTests(WeatherTestCase):
         points: list[Coordinate] = [(-96.800, 32.800), (-96.8001, 32.8002), (-96.8, 32.8)]
         payload = hourly_block()
         with patch.object(requests, "get", self.fake_get(lambda count: [payload] * count)):
-            forecasts = fetch_hourly(points, START, END)
+            forecasts = fetch_hourly(points, START, END).forecasts
 
         self.assertEqual(len(forecasts), 3)
         self.assertEqual(len(self.calls[0]["latitude"].split(",")), 1)
@@ -168,14 +168,14 @@ class BatchingTests(WeatherTestCase):
             return [hourly_block(snow_values=[float(index)] * 12) for index in range(count)]
 
         with patch.object(requests, "get", self.fake_get(payload_for)):
-            forecasts = fetch_hourly(points, START, END)
+            forecasts = fetch_hourly(points, START, END).forecasts
 
         self.assertEqual(forecasts[0].snow_in[0], 0.0)
         self.assertEqual(forecasts[1].snow_in[0], 1.0)
 
     def test_no_points_means_no_requests(self) -> None:
         with patch.object(requests, "get", self.fake_get(lambda count: [])):
-            self.assertEqual(fetch_hourly([], START, END), [])
+            self.assertEqual(fetch_hourly([], START, END).forecasts, [])
         self.assertEqual(self.calls, [])
 
 
@@ -233,7 +233,7 @@ class ShowersTests(WeatherTestCase):
         payload["hourly"]["rain"] = [0.0] * 12
         payload["hourly"]["showers"] = [0.6] * 12
         with patch.object(requests, "get", self.fake_get(lambda count: [payload] * count)):
-            forecast = fetch_hourly([(-96.8, 32.8)], START, END)[0]
+            forecast = fetch_hourly([(-96.8, 32.8)], START, END).forecasts[0]
 
         # 0.6 in/hr of convective rain is Severe; reading "rain" alone gave 0.
         self.assertAlmostEqual(forecast.rain_in[0], 0.6, places=6)
@@ -243,7 +243,7 @@ class ShowersTests(WeatherTestCase):
         payload["hourly"]["rain"] = [0.2] * 12
         payload["hourly"]["showers"] = [0.15] * 12
         with patch.object(requests, "get", self.fake_get(lambda count: [payload] * count)):
-            forecast = fetch_hourly([(-96.8, 32.8)], START, END)[0]
+            forecast = fetch_hourly([(-96.8, 32.8)], START, END).forecasts[0]
 
         self.assertAlmostEqual(forecast.rain_in[0], 0.35, places=6)
 
@@ -251,7 +251,7 @@ class ShowersTests(WeatherTestCase):
         payload = hourly_block()
         del payload["hourly"]["showers"]
         with patch.object(requests, "get", self.fake_get(lambda count: [payload] * count)):
-            forecast = fetch_hourly([(-96.8, 32.8)], START, END)[0]
+            forecast = fetch_hourly([(-96.8, 32.8)], START, END).forecasts[0]
 
         self.assertAlmostEqual(forecast.rain_in[0], 0.05, places=6)
 
@@ -308,7 +308,7 @@ class LocationCountTests(WeatherTestCase):
         points: list[Coordinate] = [(-96.80 + index * 0.014, 32.80) for index in range(20)]
         payload = hourly_block()
         with patch.object(requests, "get", self.fake_get(lambda count: [payload] * count)):
-            forecasts = fetch_hourly(points, START, END)
+            forecasts = fetch_hourly(points, START, END).forecasts
 
         asked = len(self.calls[0]["latitude"].split(","))
         self.assertEqual(len(forecasts), 20)
@@ -331,7 +331,7 @@ class LocationCountTests(WeatherTestCase):
             return [hourly_block(snow_values=[float(index)] * 12) for index in range(count)]
 
         with patch.object(requests, "get", self.fake_get(payload_for)):
-            forecasts = fetch_hourly(points, START, END)
+            forecasts = fetch_hourly(points, START, END).forecasts
 
         self.assertEqual(len(forecasts), 3)
         # The first two round to the same cell, so they share a forecast.

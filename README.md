@@ -8,8 +8,8 @@ recommends the best route.
 
 - **Backend:** Django 5 + Django REST Framework, serving JSON under `/api/`.
 - **Frontend:** React + Vite + TypeScript with Material UI and Leaflet.
-- **External APIs:** OSRM (routing), Nominatim (geocoding), Open-Meteo (weather).
-  None of them need an API key.
+- **External APIs:** OSRM (routing), Nominatim (geocoding), Open-Meteo and
+  MET Norway (weather). None of them need an API key.
 - **Map tiles:** Esri's *World Dark Gray Base*, with its matching *World Dark
   Gray Reference* layer on top for the place names. Neither needs a key. The
   base layer carries no labels of its own - checked at zoom 6, 8 and 10 over
@@ -144,6 +144,43 @@ process each would keep its own cache.
 Frame 0 of the slider is the departure itself, to the minute, and each frame
 after it is one hour later. If the departure is close to the end of the
 forecast, the slider has fewer than 48 hours.
+
+## Weather providers
+
+Weather comes from **Open-Meteo**, with **MET Norway** as a fallback. The
+response says which one answered, in `weather_source`, and the app says so
+on screen when it was the fallback.
+
+The fallback exists because of how free hosting works. Open-Meteo's free
+tier is metered per IP address, and on a free Render instance that address
+is shared with every other app on the same box. The quota can therefore be
+spent by strangers before this app makes its first call of the day - the
+logs show `89 locations, 0 cached, 89 fetched` followed immediately by a
+429. Nothing about our own usage causes it, and nothing about our own usage
+can fix it, so the app asks somewhere else instead. MET Norway is only
+tried when Open-Meteo returns 429 or cannot be reached; a bad request is
+still an error, because falling back would hide a real bug.
+
+The two services are not identical, and one difference is worth knowing:
+
+- Open-Meteo reports rain and snowfall separately, so both are used as given.
+- **MET Norway reports a single precipitation figure, so snow is estimated.**
+  When the air temperature is at or below 0 °C the precipitation is counted
+  as snow at a 10:1 snow-to-liquid ratio, and as rain otherwise. Real snow
+  depends on the whole temperature profile between cloud and ground, and the
+  real ratio runs from about 5:1 for wet snow to 20:1 for dry powder. Near
+  freezing, expect this to be approximate. The thresholds are named
+  constants in `backend/routing/services/weather.py`.
+
+MET Norway answers one location per request rather than many, so a trip
+costs more requests through the fallback. Their terms are respected: a
+descriptive `User-Agent` naming the project (override with
+`MET_NORWAY_USER_AGENT`), coordinates to four decimal places, at most eight
+requests in flight, and conditional requests that honour `Expires` and
+`Last-Modified` so a forecast is not downloaded twice.
+
+After a refusal, Open-Meteo is left alone for fifteen minutes. Without that
+every request would spend a wasted round trip rediscovering the same limit.
 
 ## How a route is scored
 

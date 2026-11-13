@@ -35,6 +35,7 @@ from .planner import (
 from .routes import RouteOption, checkpoint_eta, get_routes
 from .weather import (
     MAX_FORECAST_DAYS,
+    ProviderName,
     WeatherSample,
     fetch_hourly,
     forecast_horizon,
@@ -76,6 +77,9 @@ class TripPlan:
     deciding_criterion: RankingCriterion
     generated_at: datetime
     timings: TripTimings
+    #: Which weather service answered, so the UI can say when it was not
+    #: the usual one.
+    weather_source: ProviderName
 
 
 def plan_trip(
@@ -104,7 +108,7 @@ def plan_trip(
     _check_trip_is_forecastable(arrivals_per_route, moment)
 
     after_routes = perf_counter()
-    samples_per_route = _fetch_weather(
+    samples_per_route, weather_source = _fetch_weather(
         checkpoints_per_route, arrivals_per_route, departure, moment, cache
     )
     after_weather = perf_counter()
@@ -127,6 +131,7 @@ def plan_trip(
         recommendation_reason=build_reason(scored[best], runner_up),
         deciding_criterion=deciding_criterion(scored[best], runner_up),
         generated_at=moment,
+        weather_source=weather_source,
         timings=TripTimings(
             routes_ms=_ms(started, after_routes),
             weather_ms=_ms(after_routes, after_weather),
@@ -162,7 +167,7 @@ def _fetch_weather(
     departure: datetime,
     now: datetime,
     cache: Cache | None,
-) -> list[list[WeatherSample]]:
+) -> tuple[list[list[WeatherSample]], ProviderName]:
     """One batched forecast lookup covering every checkpoint of every route."""
     points = [
         (checkpoint.lon, checkpoint.lat)
@@ -172,7 +177,8 @@ def _fetch_weather(
     arrivals = [moment for arrivals in arrivals_per_route for moment in arrivals]
 
     window = forecast_window(departure, max(arrivals), now)
-    forecasts = fetch_hourly(points, window[0], window[1], cache=cache)
+    batch = fetch_hourly(points, window[0], window[1], cache=cache)
+    forecasts = batch.forecasts
 
     # Hand each route back the slice of forecasts belonging to its checkpoints.
     samples_per_route: list[list[WeatherSample]] = []
@@ -185,7 +191,7 @@ def _fetch_weather(
         samples_per_route.append(samples)
         position += len(checkpoints)
 
-    return samples_per_route
+    return samples_per_route, batch.source
 
 
 def _check_departure_is_forecastable(departure: datetime, now: datetime) -> None:

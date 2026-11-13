@@ -8,12 +8,14 @@ import { memo } from 'react';
 
 import type { ExampleTrip } from '../exampleTrips';
 import { COLORS, FONT_CONDENSED, MONO_SX } from '../theme';
-import type { PlanRequest } from '../types';
+import type { PlanRequest, WeatherSource } from '../types';
 import { ApiStatusChip } from './ApiStatusChip';
 import { EmptyState } from './EmptyState';
 import { PlanForm } from './PlanForm';
 
 interface Props {
+  /** Which weather service answered, once a trip has been planned. */
+  weatherSource: WeatherSource | null;
   onSubmit: (request: PlanRequest) => void;
   onPickExample: (trip: ExampleTrip) => void;
   loading: boolean;
@@ -26,6 +28,7 @@ interface Props {
 
 /** The planning panel: what the trip is. No navigation, because there is none. */
 function LeftPanelView({
+  weatherSource,
   onSubmit,
   onPickExample,
   loading,
@@ -85,7 +88,10 @@ function LeftPanelView({
               whiteSpace: 'nowrap',
             }}
           >
-            WEATHER: OPEN-METEO · ROUTING: OSRM
+            {weatherSource === 'met-norway'
+              ? 'WEATHER: MET NORWAY (FALLBACK)'
+              : 'WEATHER: OPEN-METEO'}{' '}
+            · ROUTING: OSRM
           </Typography>
 
           <ApiStatusChip />

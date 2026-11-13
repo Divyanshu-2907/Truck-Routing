@@ -140,6 +140,7 @@ export function App() {
   const leftPanel = (
     <LeftPanel
       key={formKey}
+      weatherSource={plan?.weather_source ?? null}
       onSubmit={handleSubmit}
       onPickExample={handlePickExample}
       loading={loading}

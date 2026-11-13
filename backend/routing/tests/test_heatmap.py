@@ -21,7 +21,7 @@ from routing.services.heatmap import (
     build_heatmap,
     corridor_points,
 )
-from routing.services.weather import HourlyForecast
+from routing.services.weather import HourlyForecast, WeatherBatch
 
 DEPARTURE = datetime(2026, 1, 2, 6, 30, tzinfo=UTC)
 DALLAS: Coordinate = (-96.7970, 32.7767)
@@ -99,7 +99,9 @@ class BuildHeatmapTests(unittest.TestCase):
 
     def build(self, wind_mph: float, load_lb: float) -> Any:
         def fake_fetch(points, start, end, cache=None):
-            return [forecast_of(wind_mph) for _ in points]
+            return WeatherBatch(
+                forecasts=[forecast_of(wind_mph) for _ in points], source="open-meteo"
+            )
 
         with patch.object(heatmap_module, "fetch_hourly", fake_fetch):
             return build_heatmap([self.line], DEPARTURE, load_lb)
@@ -129,7 +131,7 @@ class BuildHeatmapTests(unittest.TestCase):
         india = timezone(timedelta(hours=5, minutes=30))
 
         def fake_fetch(points, start, end, cache=None):
-            return [forecast_of(5.0) for _ in points]
+            return WeatherBatch(forecasts=[forecast_of(5.0) for _ in points], source="open-meteo")
 
         with patch.object(heatmap_module, "fetch_hourly", fake_fetch):
             grid = build_heatmap([self.line], DEPARTURE.astimezone(india), 10_000)
@@ -140,7 +142,7 @@ class BuildHeatmapTests(unittest.TestCase):
         horizon = DEPARTURE + timedelta(hours=10, minutes=15)
 
         def fake_fetch(points, start, end, cache=None):
-            return [forecast_of(5.0) for _ in points]
+            return WeatherBatch(forecasts=[forecast_of(5.0) for _ in points], source="open-meteo")
 
         with patch.object(heatmap_module, "fetch_hourly", fake_fetch):
             grid = build_heatmap([self.line], DEPARTURE, 10_000, horizon=horizon)
@@ -169,7 +171,7 @@ class BuildHeatmapTests(unittest.TestCase):
 
         def counting_fetch(points, start, end, cache=None):
             calls.append(len(points))
-            return [forecast_of(5.0) for _ in points]
+            return WeatherBatch(forecasts=[forecast_of(5.0) for _ in points], source="open-meteo")
 
         with patch.object(heatmap_module, "fetch_hourly", counting_fetch):
             build_heatmap([self.line], DEPARTURE, 10_000)
@@ -192,7 +194,10 @@ class RawReadingTests(unittest.TestCase):
 
     def build(self, wind_mph: float, rain_in: float, snow_in: float) -> Any:
         def fake_fetch(points, start, end, cache=None):
-            return [forecast_of(wind_mph, rain_in=rain_in, snow_in=snow_in) for _ in points]
+            return WeatherBatch(
+                forecasts=[forecast_of(wind_mph, rain_in=rain_in, snow_in=snow_in) for _ in points],
+                source="open-meteo",
+            )
 
         with patch.object(heatmap_module, "fetch_hourly", fake_fetch):
             return build_heatmap([self.line], DEPARTURE, 10_000)

@@ -89,6 +89,8 @@ function RightPanelView({
           <PanelSkeleton />
         ) : plan && route ? (
           <Stack spacing={2.5}>
+            {plan.weather_source === 'met-norway' ? <FallbackNotice /> : null}
+
             <Box>
               <StatTiles route={route} />
               <Box sx={{ mt: 1 }}>
@@ -128,6 +130,33 @@ function RightPanelView({
         )}
       </Box>
     </Stack>
+  );
+}
+
+/**
+ * Says so when the forecast did not come from the usual service.
+ *
+ * The snow caveat is the honest part: MET Norway reports one precipitation
+ * figure rather than splitting rain from snow, so the split here is worked
+ * out from the temperature and is an estimate.
+ */
+function FallbackNotice() {
+  return (
+    <Box
+      sx={{
+        border: `1px solid ${COLORS.border}`,
+        borderLeft: `3px solid ${COLORS.accent}`,
+        p: 1.25,
+      }}
+    >
+      <Typography sx={{ ...LABEL_SX, fontSize: 10, color: COLORS.accent, display: 'block' }}>
+        Backup weather source
+      </Typography>
+      <Typography sx={{ fontSize: 11, color: COLORS.textSecondary, mt: 0.25, lineHeight: 1.5 }}>
+        Open-Meteo quota reached on this server; using MET Norway. Snow is
+        estimated from precipitation and temperature.
+      </Typography>
+    </Box>
   );
 }
 

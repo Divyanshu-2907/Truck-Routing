@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 
 from routing.services.geo import Coordinate, point_at_bearing
 from routing.services.routes import RouteOption
-from routing.services.weather import HourlyForecast
+from routing.services.weather import HourlyForecast, WeatherBatch
 
 DALLAS: Coordinate = (-96.797, 32.7767)
 
@@ -38,7 +38,7 @@ def fake_routes(*_args: object, **_kwargs: object) -> list[RouteOption]:
 
 def calm_weather(
     points: list[Coordinate], start: datetime, end: datetime, cache: object = None
-) -> list[HourlyForecast]:
+) -> WeatherBatch:
     """Five mph of wind everywhere, for every hour of the trip."""
     first = start.replace(minute=0, second=0, microsecond=0) - timedelta(hours=1)
     hours = int((end - first).total_seconds() // 3600) + 3
@@ -49,4 +49,4 @@ def calm_weather(
         rain_in=(0.0,) * hours,
         snow_in=(0.0,) * hours,
     )
-    return [forecast for _ in points]
+    return WeatherBatch(forecasts=[forecast for _ in points], source="open-meteo")

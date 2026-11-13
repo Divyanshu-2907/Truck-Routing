@@ -126,6 +126,7 @@ def heatmap_to_dict(grid: HeatmapGrid) -> dict[str, Any]:
         "times": [moment.isoformat() for moment in grid.times],
         "points": [[round(lat, 4), round(lon, 4)] for lon, lat in grid.points],
         "values": grid.values,
+        "weather_source": grid.source,
         "wind": grid.wind,
         "rain": grid.rain,
         "snow": grid.snow,
@@ -139,6 +140,7 @@ def plan_to_dict(plan: TripPlan) -> dict[str, Any]:
         "recommended_index": plan.recommended_index,
         "recommendation_reason": plan.recommendation_reason,
         "deciding_criterion": plan.deciding_criterion,
+        "weather_source": plan.weather_source,
         "generated_at": plan.generated_at.isoformat(),
     }
 

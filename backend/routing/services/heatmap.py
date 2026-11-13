@@ -32,7 +32,7 @@ from .geo import (
 )
 from .http_client import Cache
 from .risk import assess
-from .weather import fetch_hourly, forecast_window
+from .weather import ProviderName, fetch_hourly, forecast_window
 
 #: How far apart corridor samples are along each route.
 CORRIDOR_SPACING_MILES = 50.0
@@ -86,6 +86,8 @@ class HeatmapGrid:
     rain: list[list[int]]
     #: Snow in tenths of an inch per hour, so 1.5 in/hr is 15.
     snow: list[list[int]]
+    #: Which weather service answered.
+    source: ProviderName
 
 
 def corridor_points(
@@ -159,12 +161,14 @@ def build_heatmap(
             wind=[list(row) for row in empty],
             rain=[list(row) for row in empty],
             snow=[list(row) for row in empty],
+            source="open-meteo",
         )
 
     # The same window the plan asked for, so every point it already looked
     # up is served from the cache instead of being charged again.
     window = forecast_window(departure, times[-1], now or datetime.now(UTC))
-    forecasts = fetch_hourly(points, window[0], window[1], cache=cache)
+    batch = fetch_hourly(points, window[0], window[1], cache=cache)
+    forecasts = batch.forecasts
 
     values = [[0] * len(points) for _ in times]
     wind = [[0] * len(points) for _ in times]
@@ -180,7 +184,15 @@ def build_heatmap(
             rain[hour_index][point_index] = round(sample.rain_in * RAIN_SCALE)
             snow[hour_index][point_index] = round(sample.snow_in * SNOW_SCALE)
 
-    return HeatmapGrid(times=times, points=points, values=values, wind=wind, rain=rain, snow=snow)
+    return HeatmapGrid(
+        times=times,
+        points=points,
+        values=values,
+        wind=wind,
+        rain=rain,
+        snow=snow,
+        source=batch.source,
+    )
 
 
 def _sample_miles(total_miles: float, spacing_miles: float) -> list[float]:

@@ -15,6 +15,8 @@ from __future__ import annotations
 import hashlib
 import logging
 import time
+from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 import requests
@@ -32,6 +34,9 @@ RETRY_BACKOFF_SECONDS = 0.5
 
 #: The status a service sends when it is rate limiting us.
 HTTP_TOO_MANY_REQUESTS = 429
+
+#: The status a service sends when our cached copy is still good.
+HTTP_NOT_MODIFIED = 304
 
 #: Extra attempts allowed specifically for rate limiting, on top of the
 #: ordinary retry. A limit measured per minute often clears within seconds.
@@ -60,6 +65,32 @@ def make_cache_key(prefix: str, *parts: Any) -> str:
 
 class ExternalServiceError(RuntimeError):
     """An external API was unreachable, too slow, or returned something unusable."""
+
+
+class RateLimitedError(ExternalServiceError):
+    """The service is refusing calls for now, or for the rest of the day.
+
+    Told apart from other failures because it is the one a caller can
+    answer by asking somewhere else.
+    """
+
+
+class ServiceUnreachableError(ExternalServiceError):
+    """The service did not answer: a timeout, a dropped connection, a 5xx."""
+
+
+@dataclass(frozen=True)
+class JsonResponse:
+    """What came back, including the headers a conditional request needs."""
+
+    status_code: int
+    payload: Any
+    headers: Mapping[str, str]
+
+    @property
+    def not_modified(self) -> bool:
+        """True when the service says our cached copy is still current."""
+        return self.status_code == HTTP_NOT_MODIFIED
 
 
 class Cache(Protocol):
@@ -105,11 +136,35 @@ def fetch_json(
         headers=headers,
         timeout=timeout,
         retries=retries,
-    )
+    ).payload
 
     if cache is not None and cache_key is not None:
         cache.set(cache_key, payload, cache_timeout)
     return payload
+
+
+def fetch_json_result(
+    url: str,
+    params: dict[str, Any] | None = None,
+    *,
+    service_name: str,
+    headers: dict[str, str] | None = None,
+    timeout: float = DEFAULT_TIMEOUT_SECONDS,
+    retries: int = DEFAULT_RETRIES,
+) -> JsonResponse:
+    """Like ``fetch_json``, but hands back the status and headers too.
+
+    Used by callers that make conditional requests, where a 304 and the
+    ``Expires`` header matter as much as the body.
+    """
+    return _get_with_retries(
+        url,
+        params,
+        service_name=service_name,
+        headers=headers,
+        timeout=timeout,
+        retries=retries,
+    )
 
 
 def _get_with_retries(
@@ -120,7 +175,7 @@ def _get_with_retries(
     headers: dict[str, str] | None,
     timeout: float,
     retries: int,
-) -> Any:
+) -> JsonResponse:
     """Try the request, retrying the failures that a retry can actually fix."""
     last_error = ""
     attempts_left = retries
@@ -166,7 +221,7 @@ def _get_with_retries(
                     time.sleep(wait)
                     continue
 
-                raise ExternalServiceError(
+                raise RateLimitedError(
                     f"{service_name} is receiving too many requests right now. "
                     "Please try again in a moment."
                 )
@@ -178,16 +233,28 @@ def _get_with_retries(
                 raise ExternalServiceError(
                     f"{service_name} rejected the request ({response.status_code})."
                 )
+            elif response.status_code == HTTP_NOT_MODIFIED:
+                # Nothing to parse: the caller still holds the current copy.
+                return JsonResponse(
+                    status_code=HTTP_NOT_MODIFIED,
+                    payload=None,
+                    headers=getattr(response, "headers", {}) or {},
+                )
             else:
                 try:
-                    return response.json()
+                    payload = response.json()
                 except ValueError as error:
                     raise ExternalServiceError(
                         f"{service_name} returned a response that could not be read."
                     ) from error
+                return JsonResponse(
+                    status_code=response.status_code,
+                    payload=payload,
+                    headers=getattr(response, "headers", {}) or {},
+                )
 
         if attempts_left <= 0:
-            raise ExternalServiceError(f"{last_error}. Please try again in a moment.")
+            raise ServiceUnreachableError(f"{last_error}. Please try again in a moment.")
         attempts_left -= 1
         time.sleep(RETRY_BACKOFF_SECONDS)
 
